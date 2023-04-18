@@ -20,16 +20,8 @@ def mouse(event, x, y, flags, param):
             vid_coords = np.array([[x, y, 1]])
 
 
-def mouse_point(event, x, y, flags, param):
-    global point
-    if event == 1:
-        point[0], point[1] = x, y
-        new = np.dot(conv, np.array([[x, y, 1]]).T)
-        print(new / new[-1])
-
-
 vid_coords = np.array(False)
-point = (0, 0)
+point = [0, 0]
 
 correction = [0, 0, 0]
 
@@ -38,17 +30,18 @@ mouseX, mouseY = 0, 0
 vid = cv2.VideoCapture(0)
 cv2.namedWindow('image')
 cv2.setMouseCallback('image', mouse)
+
 vid.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
 vid.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
 vid.set(cv2.CAP_PROP_FPS, 30)
 vid.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
-blue_lower_bound = np.array([33, 75, 95])
+blue_lower_bound = np.array([33, 75, 115])
 blue_upper_bound = np.array([180, 255, 255])
 yellow_lower_bound = np.array([14, 170, 95])
 yellow_upper_bound = np.array([95, 255, 255])
 
-conv = np.array(False)
+# conv = np.array(False)
 conv = np.array([[-1.21395537e+00, -1.85796898e+01,  5.29410053e+03],
  [ 8.54023496e+00,  4.45781499e+00, -1.64141440e+03],
  [-7.28641955e-05,  3.16672104e-03,  1.00000000e+00]])
@@ -58,6 +51,7 @@ if not conv.any():
         if vid_coords.any():
             for i in range(vid_coords.shape[0]):
                 cv2.circle(frame, (vid_coords[i, 0], vid_coords[i, 1]), 5, (255, 0, 0), -1)
+
             if vid_coords.shape[0] == 4:
                 break
         cv2.imshow('image', frame)
@@ -76,14 +70,6 @@ if not conv.any():
     conv /= conv[-1]
     conv = conv.reshape(3, 3)
     print(conv)
-
-
-
-    ret, frame = vid.read()
-    cv2.setMouseCallback('image', mouse_point)
-    print(point)
-    cv2.circle(frame, point, 5, (255, 255, 0), -1)
-
 
 # draw test rectangle
 test_rect = (np.linalg.inv(conv) @ corners_coords.T).T
@@ -131,6 +117,7 @@ def find_robot_abs():
     xrc /= den_r
     yrc /= den_r
     ang = math.atan2(yfc - yrc, xfc - xrc)
+
     return xfc, yfc, ang, xrc, yrc
 
 
@@ -144,11 +131,15 @@ def center_robot():
     global inv_rob_mat
     global need_ros_restart
     global robot
+    global angl
+    global x
+    global y
     if not robot.going_to_target_pos:
         print("check pos")
         x, y, ang, _, _ = find_robot_abs()
         x -= 1650
         y -= 1650
+
         odom = np.array([xr * 1000, yr * 1000, zr])
         cam_pos = np.array((x, y, ang))
         targ = odom - cam_pos
@@ -159,7 +150,7 @@ def center_robot():
             need_ros_restart = True
         print("correct error")
         print(targ)
-        robot.go_to(xi, yi, angi, prec=0.01, k=2, initial_speed=1)
+        robot.go_to(mouseX, mouseY, angl, prec=0.01, k=2, initial_speed=1)
         centering += 1
 
 
@@ -233,9 +224,8 @@ def log_odom():
                 centering = 1
         if not now_going:
             last_grab = time.time()
-            x, y, z = point[0], point[1], point[2]
-            print("rand")
-            robot.move_base(x, y, z)
+            # angl = math.atan2(mouseX - x, mouseY - y)
+            # robot.go_to(mouseX, mouseY, angl, prec=0.01, k=2, initial_speed=1)
             now_going = True
 
 
@@ -271,6 +261,7 @@ while True:
                 (255, 255, 255), 1, cv2.LINE_AA)
     cv2.circle(frame, (cent_X, cent_Y), 2, (255, 255, 255), -1)
     cv2.circle(frame, (back_X, back_Y), 2, (255, 255, 0), -1)
+    cv2.circle(frame, (mouseX, mouseY), radius=5, color=(255, 255, 0), thickness=-1)
     cv2.imshow('image', frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
