@@ -13,10 +13,11 @@ def mouse(event, x, y, flags, param):
     global mouseX, mouseY, vid_coords, click
     if event == 1:
         mouseX, mouseY = x, y
+        
         if conv.any():
             new = np.dot(conv, np.array([[x, y, 1]]).T)
-            # print(new / new[-1])
             click = new / new[-1]
+            
         if vid_coords.any():
             vid_coords = np.append(vid_coords, np.array([[x, y, 1]]), axis=0)
         else:
@@ -37,9 +38,9 @@ click = np.array([])
 
 correction = [0, 0, 0]
 
-corners_coords = np.array([[0, 0, 1], [2100, 0, 1], [2100, 2700, 1], [0, 2700, 1]])
+corners_coords = np.array([[0, 0, 1], [2100, 0, 1], [2100, 2100, 1], [0, 2100, 1]])
 mouseX, mouseY = 0, 0
-vid = cv2.VideoCapture(2)
+vid = cv2.VideoCapture(0)
 cv2.namedWindow('image')
 cv2.setMouseCallback('image', mouse)
 vid.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
@@ -47,17 +48,18 @@ vid.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
 vid.set(cv2.CAP_PROP_FPS, 30)
 vid.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
-blue_lower_bound = np.array([33, 162, 113])
-blue_upper_bound = np.array([180, 255, 255])
+blue_lower_bound = np.array([102, 128, 53])
+blue_upper_bound = np.array([180, 255, 255])  # синий
+
 yellow_lower_bound = np.array([0, 143, 156])
 yellow_upper_bound = np.array([180, 255, 255])
 
 robot = YouBot('192.168.88.23', ros=True, offline=False, camera_enable=False)
 
 conv = np.array(False)
-conv = np.array([[9.89893448e-03, -6.48379525e+00, 2.33262205e+03],
-                 [5.78828171e+00, 1.55971661e+00, -1.46446993e+03],
-                 [1.33476341e-05, 1.09126595e-03, 1.00000000e+00]])
+conv = np.array([[-1.18746175e-01, -6.54291762e+00, 3.25928730e+03],
+                 [6.31039823e+00, 1.51449571e+00, -1.84137426e+03],
+                 [3.37603828e-05, 1.28675031e-03, 1.00000000e+00]])
 if not conv.any():
     while True:
         ret, frame = vid.read()
@@ -69,7 +71,7 @@ if not conv.any():
         cv2.imshow('image', frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-    # calculate HOMOGRAPHY
+            
     A = []
     for i in range(4):
         xs, ys, _ = vid_coords[i, :]
@@ -131,37 +133,44 @@ def find_robot_abs():
     return xfc, yfc, ang, xrc, yrc
 
 
-def full_logs(delta_t, odom1, cam_pos1, f, s, r):
+def conv_matrix(x1, y1, ang):
+    matrix_cam = np.array([[np.cos(ang), -np.sin(ang), x1],
+                           [np.sin(ang), np.cos(ang), y1],
+                           [0, 0, 1]])
+    return matrix_cam
+
+
+def full_logs(delta_t, T_odom1, T_cam1, f, s, r):
     global robot
     xr, yr, zr, = robot.increment
-    odom2 = np.array([xr * 1000, yr * 1000, zr])
-    print('odom2',np.array([xr * 1000, yr * 1000, zr]))
     x, y, ang, x1, y1 = find_robot_abs()
-    cam_pos2 = np.array((x1, y1, ang))
-    print('campos2', np.array((x1, y1, ang)))
-    delta_odom = abs(odom2 - odom1)
-    delta_cam_pos = abs(cam_pos2 - cam_pos1)
-    #s_log = str(f) + ', ' + str(s) + ', ' + str(r) + '; ' + str(delta_odom[0]) + ' ,' + str(delta_odom[1]) + ' ,' + str(
-    #    delta_odom[2]) + '; ' + str(delta_cam_pos[0]) + ' ,' + str(delta_cam_pos[1]) + ' ,' + str(
-    #    delta_cam_pos[2]) + '; ' + str(delta_t) + ';' + '\n'
-    # s_log = str(f) + ', ' + str(s) + ', ' + str(r) + '; ' + ",".join(delta_odom) + ';' + ".".join(delta_cam_pos) + '; ' + str(delta_t) + ';' +'\n'
-    s_log = ('{}, {}, {}; ' + '{}, ' * len(delta_odom) + '; ' + '{}, ' * len(delta_cam_pos) + '; ' + '{};\n').format(f, s, r, *delta_odom, *delta_cam_pos, delta_t)
+
+    T_odom2 = conv_matrix(xr * 1000, yr * 1000, zr)
+    T_cam2 = conv_matrix(x, y, ang)
+
+    delta_odom = abs(np.linalg.inv(T_odom1) @ T_odom2)
+    delta_cam = abs(np.linalg.inv(T_cam1) @ T_cam2)
+    delta_odom_log = [delta_odom[0, 2], delta_odom[1, 2], math.atan2(delta_odom[1, 0], delta_odom[0, 0])]
+    delta_cam_log = [delta_cam[0, 2], delta_cam[1, 2], math.atan2(delta_cam[1, 0], delta_cam[0, 0])]
+
+    s_log = ('{}, {}, {}; ' + '{}, ' * len(delta_odom_log) + '; ' + '{}, ' * len(
+        delta_cam_log) + '; ' + '{};\n').format(f, s,
+                                                r,
+                                                *delta_odom_log,
+                                                *delta_cam_log,
+                                                delta_t)
     print(s_log)
+    # print(robot.wheels)
     file = open("logs_KUKA", 'a')
     file.write(s_log)
     file.close()
 
 
 def go_to_point():
-    print('zashel v func')
-    global inv_rob_mat
     global robot
     global x, y, x1, y1
-
-    xr, yr, zr, = robot.increment  # одометрия
-    print('odom0',np.array([xr * 1000, yr * 1000, zr]))
-    # robot.move_base(-0.1, 0, 0)
     going = False
+    
     while True:
 
         if not going:
@@ -171,31 +180,32 @@ def go_to_point():
             r = random.randint(-30, 30) / 100
 
         if going:
-            t1 = time.time()
 
-            x, y, ang, x1, y1 = find_robot_abs()  # точки на поле
-            xr, yr, zr, = robot.increment  # одометрия
-            print('odom1',np.array([xr * 1000, yr * 1000, zr]))
-            cam_pos1 = np.array((x1, y1, ang))
-            print('campos1', np.array((x1, y1, ang)))
-            odom1 = np.array([xr * 1000, yr * 1000, zr])
+            t1 = time.time()
+            T_cam1 = conv_matrix(x, y, ang)
+            T_odom1 = conv_matrix(xr * 1000, yr * 1000, zr)
+
             t3 = time.time()
-            while 2700 > x1 > 0 and 2100 > y1 > 0 and t3-t1<20:
-                robot.move_base(f, s, r)
+            while 2100 > x > 0 and 2100 > y > 0 and t3 - t1 < 20:
                 x, y, ang, x1, y1 = find_robot_abs()
+                # print('cent', x, y, 'front', x1, y1)
+                robot.move_base(f, s, r)
                 t3 = time.time()
             else:
                 t2 = time.time()
                 robot.move_base(0, 0, 0)
-                print('stop')
-                time.sleep(1)
-                delta_t = round(t2 - t1, 3)
-                full_logs(delta_t, odom1, cam_pos1, f, s, r)
+                time.sleep(3)
+                x, y, ang, x1, y1 = find_robot_abs()
+                # print('cent', x, y, 'front', x1, y1)
+                delta_t = round(t2 - t1, 5)
+                full_logs(delta_t, T_odom1, T_cam1, f, s, r)
+                # robot.go_to(0,0,0)
                 robot.move_base(-f, -s, -r)
                 time.sleep(delta_t)
                 robot.move_base(0, 0, 0)
-                time.sleep(1)
-                full_logs(delta_t, odom1, cam_pos1, -f, -s, -r)
+                time.sleep(3)
+                xr, yr, zr, = robot.increment
+                # print('odom_back', xr * 1000, yr * 1000, zr)
                 x, y, ang, x1, y1 = find_robot_abs()
                 going = False
 
@@ -212,7 +222,6 @@ while True:
     frame_lock.acquire()
     ret, frame = vid.read()
     frame_lock.release()
-    # cv2.createTrackbar()
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     frame = cv2.polylines(frame, [test_rect], True, (255, 255, 255), 1)
     cent_X, cent_Y, back_X, back_Y = find_robot(hsv)
@@ -229,6 +238,7 @@ while True:
         cv2.putText(frame, f"y2: {round(yr * 1000)}", (300, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1,
                     cv2.LINE_AA)
         cv2.putText(frame, f"ang2: {zr}", (300, 75), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1, cv2.LINE_AA)
+
     cv2.putText(frame, f"ang: {round(ang, 5)}", (0, 75), cv2.FONT_HERSHEY_SIMPLEX, 1,
                 (255, 255, 255), 1, cv2.LINE_AA)
     cv2.circle(frame, (cent_X, cent_Y), 2, (255, 255, 255), -1)
